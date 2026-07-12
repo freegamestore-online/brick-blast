@@ -1,5 +1,5 @@
 {
-  "name": "@APPNAME/web",
+  "name": "@brick-blast/web",
   "private": true,
   "type": "module",
   "scripts": {

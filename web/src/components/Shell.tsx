@@ -20,7 +20,7 @@ export function Shell({ children, sidebar, dock }: ShellProps) {
           }}
         >
           <div className="p-6 font-bold text-lg" style={{ fontFamily: "Fraunces, serif" }}>
-            APPNAME
+            Brick Blast
           </div>
           {sidebar}
           <div className="p-4 text-xs" style={{ color: "var(--muted)" }}>
@@ -45,7 +45,7 @@ export function Shell({ children, sidebar, dock }: ShellProps) {
           style={{ borderColor: "var(--line)", background: "var(--panel)" }}
         >
           <span className="font-bold" style={{ fontFamily: "Fraunces, serif" }}>
-            APPNAME
+            Brick Blast
           </span>
           {dock && <div className="flex items-center gap-3">{dock}</div>}
         </header>

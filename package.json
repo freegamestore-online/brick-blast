@@ -1,13 +1,13 @@
 {
-  "name": "APPNAME",
+  "name": "brick-blast",
   "private": true,
   "packageManager": "pnpm@10.30.3",
   "engines": { "node": ">=22" },
   "pnpm": { "onlyBuiltDependencies": ["esbuild"] },
   "scripts": {
-    "dev": "pnpm --filter @APPNAME/web dev",
-    "build": "pnpm --filter @APPNAME/web build",
-    "preview": "pnpm --filter @APPNAME/web preview",
-    "typecheck": "pnpm --filter @APPNAME/web exec tsc -b"
+    "dev": "pnpm --filter @brick-blast/web dev",
+    "build": "pnpm --filter @brick-blast/web build",
+    "preview": "pnpm --filter @brick-blast/web preview",
+    "typecheck": "pnpm --filter @brick-blast/web exec tsc -b"
   }
 }
