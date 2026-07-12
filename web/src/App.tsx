@@ -2,442 +2,370 @@ import { useEffect, useRef } from "react";
 import * as LJS from "littlejsengine";
 import { Shell } from "./components/Shell";
 
-// ─── World constants ──────────────────────────────────────────────────────────
-const WORLD_W = 16;   // half-width  → x in [-WORLD_W, WORLD_W]
-const WORLD_H = 11;   // half-height → y in [-WORLD_H, WORLD_H]
-const CAM_SCALE = 48;
+// ─── Procedural ZzFX sounds — zero asset files ───────────────────────────────
+const sndBounce = new LJS.Sound([, , 440, , 0.02, 0.05, , 1.2, , , , , , 0.5]);
+const sndBreak  = new LJS.Sound([, , 200, 0.02, 0.05, 0.2, 1, 1.8, , , , , , 0.4]);
+const sndLose   = new LJS.Sound([, , 180, , 0.2, 0.4, 1, 0.4, -3, , , , , 0.3]);
+const sndStart  = new LJS.Sound([, , 520, , 0.05, 0.15, , 1.5, , 8, , , , 0.3]);
+const sndPaddle = new LJS.Sound([, , 320, , 0.01, 0.04, , 2, , , , , , 0.6]);
 
-// Paddle
-const PADDLE_Y = -9.0;
+// ─── World constants ──────────────────────────────────────────────────────────
+const W        = 18;   // world half-width  → x in [-W/2, W/2]
+const H        = 22;   // world height      → y in [-H/2, H/2]
+const HW       = W / 2;
+const HH       = H / 2;
+const PADDLE_Y = -HH + 1.2;
+const BALL_R   = 0.45;
 const PADDLE_W = 3.2;
 const PADDLE_H = 0.55;
-const PADDLE_SPEED = 0.35;
 
-// Ball
-const BALL_R = 0.38;
-const BALL_SPEED_INIT = 0.22;
-const BALL_SPEED_MAX = 0.42;
+// Brick grid
+const BRICK_COLS   = 10;
+const BRICK_ROWS   = 6;
+const BRICK_W      = 1.5;
+const BRICK_H      = 0.65;
+const BRICK_PAD    = 0.12;
+const BRICKS_TOP_Y = HH - 2.8;
 
-// Bricks
-const BRICK_COLS = 10;
-const BRICK_ROWS = 6;
-const BRICK_W = 2.6;
-const BRICK_H = 0.8;
-const BRICK_GAP = 0.18;
-const BRICK_TOP = 6.8;   // y of top brick row centre
-
-// ─── Procedural sounds (ZzFX) ─────────────────────────────────────────────────
-const sndBounce = new LJS.Sound([, , 440, , 0.02, 0.04, , 1.8, , , , , , 0.5]);
-const sndBrick  = new LJS.Sound([, , 320, 0.01, 0.05, 0.15, 1, 1.6, , , , , , , , 0.3]);
-const sndLose   = new LJS.Sound([, , 180, , 0.15, 0.5, 1, 0.4, -3, , , , , 0.3]);
-const sndWin    = new LJS.Sound([, , 600, , 0.1, 0.35, , 1.5, , 8, 300, 0.06, 0.3]);
-const sndStart  = new LJS.Sound([, , 500, , 0.06, 0.18, , 2, , , 200, 0.05]);
-
-// ─── Colour palette for brick rows ───────────────────────────────────────────
+// Row colours (vivid, one per row)
 const ROW_COLORS: LJS.Color[] = [
   new LJS.Color(1.0, 0.25, 0.25),   // red
-  new LJS.Color(1.0, 0.55, 0.1),    // orange
-  new LJS.Color(1.0, 0.9,  0.1),    // yellow
-  new LJS.Color(0.2, 0.85, 0.3),    // green
-  new LJS.Color(0.2, 0.7,  1.0),    // blue
-  new LJS.Color(0.75, 0.3, 1.0),    // purple
+  new LJS.Color(1.0, 0.55, 0.10),   // orange
+  new LJS.Color(1.0, 0.90, 0.10),   // yellow
+  new LJS.Color(0.25, 0.90, 0.30),  // green
+  new LJS.Color(0.20, 0.70, 1.00),  // blue
+  new LJS.Color(0.80, 0.30, 1.00),  // purple
 ];
 
 // ─── Game state ───────────────────────────────────────────────────────────────
-type Phase = "start" | "playing" | "dead" | "won";
+type Phase = "start" | "playing" | "gameover";
 
-let phase: Phase = "start";
-let score = 0;
-let lives = 3;
-let highScore = Number(localStorage.getItem("brickblast_hs") || "0");
+let phase: Phase    = "start";
+let score           = 0;
+let lives           = 3;
+let highScore       = Number(localStorage.getItem("brickblast_hs") || "0");
 let bricks: Brick[] = [];
 let ball: Ball | null = null;
 let paddle: LJS.EngineObject | null = null;
-let ballStuck = true;   // ball glued to paddle until first click/tap/space
+let paddleTargetX   = 0;
+let ballLaunched    = false;
 
-// ─── Brick class ─────────────────────────────────────────────────────────────
+// ─── Brick ────────────────────────────────────────────────────────────────────
 class Brick extends LJS.EngineObject {
   row: number;
-  hp: number;
-  maxHp: number;
-  baseColor: LJS.Color;
+  alive: boolean;
 
-  constructor(pos: LJS.Vector2, row: number, hp: number) {
-    super(pos, LJS.vec2(BRICK_W - BRICK_GAP, BRICK_H - BRICK_GAP));
+  constructor(pos: LJS.Vector2, row: number) {
+    super(pos, LJS.vec2(BRICK_W, BRICK_H));
     this.row = row;
-    this.hp = hp;
-    this.maxHp = hp;
-    this.baseColor = ROW_COLORS[row % ROW_COLORS.length] ?? new LJS.Color(1, 1, 1);
-    this.color = this.baseColor;
+    this.alive = true;
+    this.color = ROW_COLORS[row] ?? new LJS.Color(1, 1, 1);
     this.gravityScale = 0;
-    this.mass = 0; // static
+    this.setCollision(true, false);
   }
 
-  hit() {
-    this.hp -= 1;
-    // Flash white briefly
+  shatter() {
+    if (!this.alive) return;
+    this.alive = false;
+    const c = ROW_COLORS[this.row] ?? new LJS.Color(1, 1, 1);
+    // Particle burst — juicy!
+    new LJS.ParticleEmitter(
+      this.pos, 0,
+      0.5,   // emitSize
+      0.0,   // emitTime (burst)
+      40,    // emitRate
+      Math.PI * 2, // emitConeAngle
+      undefined,
+      c,                          new LJS.Color(1, 1, 1),
+      new LJS.Color(c.r, c.g, c.b, 0), new LJS.Color(1, 1, 1, 0),
+      0.35, 0.1, 0.25, 0.08, 0.06,
+    );
+    sndBreak.play(this.pos);
+    this.destroy();
+  }
+}
+
+// ─── Ball ─────────────────────────────────────────────────────────────────────
+const BALL_SPEED = 0.22;
+
+class Ball extends LJS.EngineObject {
+  constructor(pos: LJS.Vector2) {
+    super(pos, LJS.vec2(BALL_R * 2));
     this.color = new LJS.Color(1, 1, 1);
-    if (this.hp <= 0) {
-      this.explode();
-      this.destroy();
-      bricks = bricks.filter((b) => b !== this);
-    }
+    this.gravityScale = 0;
+    this.velocity = LJS.vec2(0, 0);
+    this.setCollision(true, false);
+  }
+
+  launch() {
+    const angle = (Math.random() * 0.6 + 0.2) * Math.PI; // between ~36° and ~144° upward
+    this.velocity = LJS.vec2(Math.cos(angle) * BALL_SPEED, Math.sin(angle) * BALL_SPEED);
   }
 
   update() {
     super.update();
-    // Fade colour back to base
-    if (this.hp > 0) {
-      const t = this.hp / this.maxHp;
-      this.color = this.baseColor.lerp(new LJS.Color(1, 1, 1), 1 - t + 0.15);
-    }
-  }
 
-  explode() {
-    const c = this.baseColor;
-    new LJS.ParticleEmitter(
-      this.pos, 0,              // pos, angle
-      0.5,                      // emitSize
-      0,                        // emitTime (burst)
-      40,                       // emitRate
-      Math.PI * 2,              // emitConeAngle
-      undefined,                // tileInfo
-      c, c.lerp(new LJS.Color(1, 1, 1), 0.5),   // colorStartA, colorStartB
-      new LJS.Color(c.r, c.g, c.b, 0), new LJS.Color(c.r * 0.5, c.g * 0.5, c.b * 0.5, 0), // colorEndA/B
-      0.5,  // particleTime
-      0.12, // sizeStart
-      0.0,  // sizeEnd
-      0.18, // particleSpeed
-      0.06, // particleAngleSpeed
-      0,    // damping
-      0,    // angleDamping
-      0.1,  // gravityScale
-      0.5,  // particleConeAngle
-      0.1,  // fadeRate
-      1,    // randomness
-      false // collide
-    );
-  }
-}
-
-// ─── Ball class ───────────────────────────────────────────────────────────────
-class Ball extends LJS.EngineObject {
-  speed: number;
-
-  constructor(pos: LJS.Vector2, vel: LJS.Vector2) {
-    super(pos, LJS.vec2(BALL_R * 2));
-    this.velocity = vel;
-    this.speed = vel.length();
-    this.color = new LJS.Color(1, 1, 1);
-    this.gravityScale = 0;
-    this.elasticity = 1;
-    this.friction = 0;
-  }
-
-  update() {
-    if (ballStuck && paddle) {
-      // Glue to paddle
-      this.pos = LJS.vec2(paddle.pos.x, PADDLE_Y + PADDLE_H * 0.5 + BALL_R + 0.05);
-      this.velocity = LJS.vec2(0, 0);
+    if (!ballLaunched) {
+      // Sit on paddle
+      if (paddle) this.pos = LJS.vec2(paddle.pos.x, PADDLE_Y + PADDLE_H / 2 + BALL_R + 0.05);
       return;
     }
 
-    // Normalise speed (prevent drift)
-    const len = this.velocity.length();
-    if (len > 0.001) {
-      this.speed = LJS.clamp(this.speed, BALL_SPEED_INIT, BALL_SPEED_MAX);
-      this.velocity = this.velocity.scale(this.speed / len);
+    // Wall bounces (left / right / top)
+    if (this.pos.x - BALL_R < -HW) {
+      this.pos.x = -HW + BALL_R;
+      this.velocity.x = Math.abs(this.velocity.x);
+      sndBounce.play(this.pos);
     }
-
-    // Wall bounces (left/right/top)
-    const halfW = WORLD_W - BALL_R;
-    if (this.pos.x < -halfW) { this.pos.x = -halfW; this.velocity.x = Math.abs(this.velocity.x); sndBounce.play(this.pos); }
-    if (this.pos.x >  halfW) { this.pos.x =  halfW; this.velocity.x = -Math.abs(this.velocity.x); sndBounce.play(this.pos); }
-    const halfH = WORLD_H - BALL_R;
-    if (this.pos.y >  halfH) { this.pos.y =  halfH; this.velocity.y = -Math.abs(this.velocity.y); sndBounce.play(this.pos); }
-
-    // Fell below paddle → lose a life
-    if (this.pos.y < -WORLD_H - 1) {
-      lives -= 1;
-      sndLose.play();
-      // Small screen-shake via camera
-      LJS.setCameraPos(LJS.vec2((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4));
-      if (lives <= 0) {
-        if (score > highScore) {
-          highScore = score;
-          localStorage.setItem("brickblast_hs", String(highScore));
-        }
-        phase = "dead";
-        this.destroy();
-        ball = null;
-      } else {
-        // Reset ball to paddle
-        ballStuck = true;
-        this.pos = LJS.vec2(paddle ? paddle.pos.x : 0, PADDLE_Y + PADDLE_H * 0.5 + BALL_R + 0.05);
-        this.velocity = LJS.vec2(0, 0);
-      }
-      return;
+    if (this.pos.x + BALL_R > HW) {
+      this.pos.x = HW - BALL_R;
+      this.velocity.x = -Math.abs(this.velocity.x);
+      sndBounce.play(this.pos);
+    }
+    if (this.pos.y + BALL_R > HH) {
+      this.pos.y = HH - BALL_R;
+      this.velocity.y = -Math.abs(this.velocity.y);
+      sndBounce.play(this.pos);
     }
 
     // Paddle collision
     if (paddle) {
-      const dx = Math.abs(this.pos.x - paddle.pos.x);
-      const dy = Math.abs(this.pos.y - paddle.pos.y);
-      const overlapX = PADDLE_W * 0.5 + BALL_R - dx;
-      const overlapY = PADDLE_H * 0.5 + BALL_R - dy;
-      if (overlapX > 0 && overlapY > 0) {
-        if (overlapY < overlapX) {
-          // Hit top/bottom of paddle
-          this.velocity.y = Math.abs(this.velocity.y); // always bounce up
-          this.pos.y = paddle.pos.y + PADDLE_H * 0.5 + BALL_R;
-          // Add angle based on where ball hit paddle
-          const rel = (this.pos.x - paddle.pos.x) / (PADDLE_W * 0.5);
-          this.velocity.x += rel * 0.08;
-          sndBounce.play(this.pos);
-          // Speed up slightly each paddle hit
-          this.speed = Math.min(this.speed + 0.008, BALL_SPEED_MAX);
-        } else {
-          // Side of paddle
-          this.velocity.x = this.pos.x > paddle.pos.x ? Math.abs(this.velocity.x) : -Math.abs(this.velocity.x);
-          sndBounce.play(this.pos);
-        }
+      const px = paddle.pos.x;
+      const py = PADDLE_Y;
+      const dx = this.pos.x - LJS.clamp(this.pos.x, px - PADDLE_W / 2, px + PADDLE_W / 2);
+      const dy = this.pos.y - LJS.clamp(this.pos.y, py - PADDLE_H / 2, py + PADDLE_H / 2);
+      if (dx * dx + dy * dy < BALL_R * BALL_R && this.velocity.y < 0) {
+        // Reflect & add spin based on hit offset
+        const hitOffset = (this.pos.x - px) / (PADDLE_W / 2); // -1 to 1
+        const spd = Math.hypot(this.velocity.x, this.velocity.y);
+        const angle = Math.PI / 2 - hitOffset * 1.1; // ~18° to ~162°
+        this.velocity.x = Math.cos(angle) * spd;
+        this.velocity.y = Math.abs(Math.sin(angle) * spd);
+        this.pos.y = py + PADDLE_H / 2 + BALL_R + 0.01;
+        sndPaddle.play(this.pos);
       }
     }
 
     // Brick collisions
-    for (const brick of [...bricks]) {
-      const dx = Math.abs(this.pos.x - brick.pos.x);
-      const dy = Math.abs(this.pos.y - brick.pos.y);
-      const hw = (BRICK_W - BRICK_GAP) * 0.5 + BALL_R;
-      const hh = (BRICK_H - BRICK_GAP) * 0.5 + BALL_R;
-      if (dx < hw && dy < hh) {
-        const overlapX = hw - dx;
-        const overlapY = hh - dy;
+    for (const brick of bricks) {
+      if (!brick.alive) continue;
+      const bx = brick.pos.x;
+      const by = brick.pos.y;
+      const hw = BRICK_W / 2 + BALL_R;
+      const hh = BRICK_H / 2 + BALL_R;
+      if (Math.abs(this.pos.x - bx) < hw && Math.abs(this.pos.y - by) < hh) {
+        // Determine collision axis
+        const overlapX = hw - Math.abs(this.pos.x - bx);
+        const overlapY = hh - Math.abs(this.pos.y - by);
         if (overlapX < overlapY) {
-          this.velocity.x = this.pos.x > brick.pos.x ? Math.abs(this.velocity.x) : -Math.abs(this.velocity.x);
+          this.velocity.x *= -1;
+          this.pos.x += this.velocity.x > 0 ? overlapX : -overlapX;
         } else {
-          this.velocity.y = this.pos.y > brick.pos.y ? Math.abs(this.velocity.y) : -Math.abs(this.velocity.y);
+          this.velocity.y *= -1;
+          this.pos.y += this.velocity.y > 0 ? overlapY : -overlapY;
         }
-        const pts = brick.maxHp;
-        score += pts * 10;
-        sndBrick.play(brick.pos);
-        brick.hit();
-        break; // one brick per frame to avoid tunnelling weirdness
+        brick.shatter();
+        score += (BRICK_ROWS - brick.row) * 10;
+        break; // one brick per frame
       }
     }
 
-    // Restore camera drift
-    LJS.setCameraPos(LJS.vec2(
-      LJS.getCameraPos().x * 0.85,
-      LJS.getCameraPos().y * 0.85,
-    ));
-
-    super.update();
-  }
-
-  render() {
-    // Glowing ball: draw a slightly larger translucent circle beneath
-    LJS.drawRect(this.pos, LJS.vec2(BALL_R * 3.2), new LJS.Color(1, 1, 1, 0.12));
-    LJS.drawRect(this.pos, LJS.vec2(BALL_R * 2.2), new LJS.Color(1, 1, 1, 0.35));
-    LJS.drawRect(this.pos, LJS.vec2(BALL_R * 2),   new LJS.Color(1, 1, 1));
+    // Ball lost
+    if (this.pos.y - BALL_R < -HH) {
+      handleBallLost();
+    }
   }
 }
 
-// ─── Build brick grid ─────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function spawnBricks() {
   bricks.forEach((b) => b.destroy());
   bricks = [];
-  const totalW = BRICK_COLS * BRICK_W;
+  const totalW = BRICK_COLS * (BRICK_W + BRICK_PAD) - BRICK_PAD;
   const startX = -totalW / 2 + BRICK_W / 2;
   for (let row = 0; row < BRICK_ROWS; row++) {
     for (let col = 0; col < BRICK_COLS; col++) {
-      const x = startX + col * BRICK_W;
-      const y = BRICK_TOP - row * BRICK_H;
-      // Harder bricks near the top
-      const hp = BRICK_ROWS - row;
-      bricks.push(new Brick(LJS.vec2(x, y), row, hp));
+      const x = startX + col * (BRICK_W + BRICK_PAD);
+      const y = BRICKS_TOP_Y - row * (BRICK_H + BRICK_PAD);
+      bricks.push(new Brick(LJS.vec2(x, y), row));
     }
   }
 }
 
-// ─── Engine lifecycle ─────────────────────────────────────────────────────────
-function gameInit() {
-  LJS.setCameraPos(LJS.vec2(0, 0));
-  LJS.setCameraScale(CAM_SCALE);
-
+function spawnPaddleAndBall() {
+  if (paddle) paddle.destroy();
   paddle = new LJS.EngineObject(LJS.vec2(0, PADDLE_Y), LJS.vec2(PADDLE_W, PADDLE_H));
-  paddle.color = new LJS.Color(0.35, 0.8, 1.0);
+  paddle.color = new LJS.Color(0.3, 0.85, 1.0);
   paddle.gravityScale = 0;
-  paddle.mass = 0;
+  paddleTargetX = 0;
+
+  if (ball) ball.destroy();
+  ball = new Ball(LJS.vec2(0, PADDLE_Y + PADDLE_H / 2 + BALL_R + 0.05));
+  ballLaunched = false;
 }
 
-function resetGame() {
-  // Destroy old ball
+function handleBallLost() {
+  sndLose.play();
+  lives -= 1;
+  // Explosion at bottom
+  new LJS.ParticleEmitter(
+    LJS.vec2(ball ? ball.pos.x : 0, -HH + 0.5), 0,
+    1, 0, 30, Math.PI,
+    undefined,
+    new LJS.Color(1, 0.3, 0.2), new LJS.Color(1, 0.8, 0.2),
+    new LJS.Color(1, 0.3, 0.2, 0), new LJS.Color(1, 0.8, 0.2, 0),
+    0.5, 0.15, 0.3, 0.1, 0.08,
+  );
   if (ball) { ball.destroy(); ball = null; }
-  score = 0;
-  lives = 3;
-  ballStuck = true;
-  spawnBricks();
-  phase = "playing";
-  sndStart.play();
-}
 
-function gameUpdate() {
-  // ── Paddle movement (always active for feel) ──────────────────────────────
-  if (paddle) {
-    const dx = Number(LJS.keyIsDown("ArrowRight")) - Number(LJS.keyIsDown("ArrowLeft"));
-    paddle.pos.x = LJS.clamp(paddle.pos.x + dx * PADDLE_SPEED, -WORLD_W + PADDLE_W * 0.5, WORLD_W - PADDLE_W * 0.5);
-    // Mouse / touch follow
-    if (LJS.mousePos.x !== 0 || LJS.mousePos.y !== 0) {
-      paddle.pos.x = LJS.clamp(LJS.mousePos.x, -WORLD_W + PADDLE_W * 0.5, WORLD_W - PADDLE_W * 0.5);
-    }
-  }
-
-  // ── Phase: start ──────────────────────────────────────────────────────────
-  if (phase === "start") {
-    if (LJS.mouseWasPressed(0) || LJS.keyWasPressed("Space") || LJS.keyWasPressed("Enter")) {
-      resetGame();
-    }
-    return;
-  }
-
-  // ── Phase: dead / won ─────────────────────────────────────────────────────
-  if (phase === "dead" || phase === "won") {
-    if (LJS.mouseWasPressed(0) || LJS.keyWasPressed("Space") || LJS.keyWasPressed("Enter")) {
-      resetGame();
-    }
-    return;
-  }
-
-  // ── Phase: playing ────────────────────────────────────────────────────────
-  // Launch ball
-  if (ballStuck) {
-    if (!ball && paddle) {
-      ball = new Ball(
-        LJS.vec2(paddle.pos.x, PADDLE_Y + PADDLE_H * 0.5 + BALL_R + 0.05),
-        LJS.vec2(0, 0),
-      );
-    }
-    if (LJS.mouseWasPressed(0) || LJS.keyWasPressed("Space") || LJS.keyWasPressed("ArrowUp")) {
-      ballStuck = false;
-      const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.6;
-      if (ball) {
-        ball.velocity = LJS.vec2(Math.cos(angle), Math.sin(angle)).scale(BALL_SPEED_INIT);
-        ball.speed = BALL_SPEED_INIT;
-      }
-    }
-  }
-
-  // Check win
-  if (bricks.length === 0 && phase === "playing") {
+  if (lives <= 0) {
     if (score > highScore) {
       highScore = score;
       localStorage.setItem("brickblast_hs", String(highScore));
     }
-    phase = "won";
-    sndWin.play();
-    // Big particle celebration
-    if (ball) {
-      new LJS.ParticleEmitter(
-        LJS.vec2(0, 0), 0, 8, 0.1, 200, Math.PI * 2,
-        undefined,
-        new LJS.Color(1, 0.9, 0.2), new LJS.Color(0.2, 1, 0.6),
-        new LJS.Color(1, 0.5, 0.1, 0), new LJS.Color(0.2, 0.6, 1, 0),
-        1.2, 0.2, 0.05, 0.25, 0.1, 0, 0, 0.05, 0.5, 0.1, 1, false,
-      );
+    phase = "gameover";
+  } else {
+    // Re-serve
+    spawnPaddleAndBall();
+  }
+}
+
+function startGame() {
+  score = 0;
+  lives = 3;
+  phase = "playing";
+  spawnBricks();
+  spawnPaddleAndBall();
+  sndStart.play();
+}
+
+// ─── Engine callbacks ─────────────────────────────────────────────────────────
+function gameInit() {
+  LJS.setCameraPos(LJS.vec2(0, 0));
+  LJS.setCameraScale(32);
+}
+
+function gameUpdate() {
+  if (phase === "start" || phase === "gameover") {
+    if (LJS.mouseWasPressed(0) || LJS.keyWasPressed("Space") || LJS.keyWasPressed("Enter")) {
+      startGame();
     }
+    return;
+  }
+
+  // ── Paddle movement ──
+  if (paddle) {
+    // Mouse / touch: follow pointer directly
+    paddleTargetX = LJS.clamp(LJS.mousePos.x, -HW + PADDLE_W / 2, HW - PADDLE_W / 2);
+    // Arrow keys add velocity on top
+    const kd = Number(LJS.keyIsDown("ArrowRight")) - Number(LJS.keyIsDown("ArrowLeft"));
+    paddleTargetX = LJS.clamp(paddleTargetX + kd * 0.35, -HW + PADDLE_W / 2, HW - PADDLE_W / 2);
+    paddle.pos.x += (paddleTargetX - paddle.pos.x) * 0.35;
+    paddle.pos.y = PADDLE_Y;
+  }
+
+  // ── Launch ball ──
+  if (!ballLaunched) {
+    if (LJS.mouseWasPressed(0) || LJS.keyWasPressed("Space") || LJS.keyWasPressed("ArrowUp")) {
+      ballLaunched = true;
+      ball?.launch();
+    }
+  }
+
+  // ── All bricks cleared → next wave ──
+  if (bricks.every((b) => !b.alive)) {
+    score += 500; // wave bonus
+    spawnBricks();
+    spawnPaddleAndBall();
+    sndStart.play();
   }
 }
 
 function gameRender() {
-  // ── Background gradient strips ────────────────────────────────────────────
-  LJS.drawRect(LJS.vec2(0, 0), LJS.vec2(WORLD_W * 2, WORLD_H * 2), new LJS.Color(0.04, 0.04, 0.12));
+  // Background gradient feel — dark court
+  LJS.drawRect(LJS.vec2(0, 0), LJS.vec2(W + 2, H + 2), new LJS.Color(0.05, 0.05, 0.12));
 
-  // Subtle horizontal scanlines for retro feel
-  for (let y = -WORLD_H; y < WORLD_H; y += 1.2) {
-    LJS.drawRect(LJS.vec2(0, y), LJS.vec2(WORLD_W * 2, 0.02), new LJS.Color(1, 1, 1, 0.02));
+  // Side walls (decorative lines)
+  LJS.drawRect(LJS.vec2(-HW - 0.3, 0), LJS.vec2(0.3, H + 2), new LJS.Color(0.15, 0.2, 0.35));
+  LJS.drawRect(LJS.vec2( HW + 0.3, 0), LJS.vec2(0.3, H + 2), new LJS.Color(0.15, 0.2, 0.35));
+
+  // Draw paddle with glow
+  if (paddle && phase === "playing") {
+    LJS.drawRect(paddle.pos, LJS.vec2(PADDLE_W + 0.25, PADDLE_H + 0.25), new LJS.Color(0.3, 0.85, 1.0, 0.25));
+    LJS.drawRect(paddle.pos, LJS.vec2(PADDLE_W, PADDLE_H), new LJS.Color(0.3, 0.85, 1.0));
   }
 
-  // ── Paddle glow ───────────────────────────────────────────────────────────
-  if (paddle) {
-    LJS.drawRect(paddle.pos, LJS.vec2(PADDLE_W + 0.3, PADDLE_H + 0.3), new LJS.Color(0.35, 0.8, 1.0, 0.18));
-    LJS.drawRect(paddle.pos, LJS.vec2(PADDLE_W, PADDLE_H), new LJS.Color(0.35, 0.8, 1.0));
-    // Highlight stripe
+  // Draw ball
+  if (ball && phase === "playing") {
+    // Glow
+    LJS.drawRect(ball.pos, LJS.vec2(BALL_R * 2 + 0.3), new LJS.Color(1, 1, 0.8, 0.25));
+    LJS.drawRect(ball.pos, LJS.vec2(BALL_R * 2), new LJS.Color(1, 1, 1));
+  }
+
+  // Draw bricks
+  for (const brick of bricks) {
+    if (!brick.alive) continue;
+    const c = ROW_COLORS[brick.row] ?? new LJS.Color(1, 1, 1);
+    // Glow halo
+    LJS.drawRect(brick.pos, LJS.vec2(BRICK_W + 0.12, BRICK_H + 0.12), new LJS.Color(c.r, c.g, c.b, 0.3));
+    // Main brick
+    LJS.drawRect(brick.pos, LJS.vec2(BRICK_W, BRICK_H), c);
+    // Highlight
     LJS.drawRect(
-      LJS.vec2(paddle.pos.x, paddle.pos.y + PADDLE_H * 0.25),
-      LJS.vec2(PADDLE_W - 0.2, PADDLE_H * 0.25),
-      new LJS.Color(1, 1, 1, 0.3),
+      LJS.vec2(brick.pos.x, brick.pos.y + BRICK_H * 0.28),
+      LJS.vec2(BRICK_W * 0.85, BRICK_H * 0.25),
+      new LJS.Color(1, 1, 1, 0.18),
     );
   }
 
-  // ── HUD ───────────────────────────────────────────────────────────────────
-  LJS.drawText(`${score}`, LJS.vec2(0, WORLD_H - 1.1), 1.4, new LJS.Color(1, 1, 1));
-  // Lives as dots
-  for (let i = 0; i < 3; i++) {
-    const filled = i < lives;
-    LJS.drawRect(
-      LJS.vec2(-WORLD_W + 1.0 + i * 0.85, WORLD_H - 0.9),
-      LJS.vec2(0.55),
-      filled ? new LJS.Color(0.35, 0.8, 1.0) : new LJS.Color(0.3, 0.3, 0.4),
-    );
-  }
-  LJS.drawText(`HI ${highScore}`, LJS.vec2(WORLD_W - 2.2, WORLD_H - 0.9), 0.75, new LJS.Color(0.5, 0.5, 0.7));
+  // ── HUD ──
+  LJS.drawText(`${score}`, LJS.vec2(0, HH - 0.8), 1.1, new LJS.Color(1, 1, 1));
+  LJS.drawText(`♥ ${lives}`, LJS.vec2(-HW + 1.2, HH - 0.8), 0.9, new LJS.Color(1, 0.4, 0.5));
+  LJS.drawText(`Best ${highScore}`, LJS.vec2(HW - 2.0, HH - 0.8), 0.75, new LJS.Color(0.7, 0.9, 1));
 
-  // ── Overlays ──────────────────────────────────────────────────────────────
+  // ── Start screen ──
   if (phase === "start") {
-    LJS.drawRect(LJS.vec2(0, 0), LJS.vec2(WORLD_W * 2, WORLD_H * 2), new LJS.Color(0, 0, 0, 0.55));
-    LJS.drawText("BRICK BLAST", LJS.vec2(0, 3.5), 2.2, new LJS.Color(0.35, 0.8, 1.0));
-    LJS.drawText("Break all the bricks!", LJS.vec2(0, 1.5), 0.9, new LJS.Color(0.8, 0.8, 1.0));
-    LJS.drawText("← → or mouse to move", LJS.vec2(0, 0.2), 0.75, new LJS.Color(0.6, 0.6, 0.8));
-    LJS.drawText("SPACE / tap to launch", LJS.vec2(0, -0.7), 0.75, new LJS.Color(0.6, 0.6, 0.8));
-    LJS.drawText("TAP TO START", LJS.vec2(0, -2.5), 1.1, new LJS.Color(1, 0.9, 0.2));
+    LJS.drawRect(LJS.vec2(0, 0), LJS.vec2(W + 2, H + 2), new LJS.Color(0.0, 0.0, 0.08, 0.75));
+    LJS.drawText("BRICK BLAST", LJS.vec2(0, 3.5), 2.0, new LJS.Color(0.3, 0.85, 1.0));
+    LJS.drawText("Break all the bricks!", LJS.vec2(0, 1.2), 0.9, new LJS.Color(0.9, 0.9, 1.0));
+    LJS.drawText("Move: mouse or ← →", LJS.vec2(0, -0.2), 0.75, new LJS.Color(0.7, 0.8, 1.0));
+    LJS.drawText("Launch: click or Space", LJS.vec2(0, -1.2), 0.75, new LJS.Color(0.7, 0.8, 1.0));
+    LJS.drawText("TAP / CLICK TO START", LJS.vec2(0, -3.0), 1.0, new LJS.Color(1, 0.9, 0.2));
     if (highScore > 0) {
-      LJS.drawText(`Best: ${highScore}`, LJS.vec2(0, -4.0), 0.85, new LJS.Color(0.5, 0.8, 0.5));
+      LJS.drawText(`Best: ${highScore}`, LJS.vec2(0, -4.5), 0.85, new LJS.Color(0.8, 1.0, 0.8));
     }
   }
 
-  if (phase === "dead") {
-    LJS.drawRect(LJS.vec2(0, 0), LJS.vec2(WORLD_W * 2, WORLD_H * 2), new LJS.Color(0, 0, 0, 0.6));
-    LJS.drawText("GAME OVER", LJS.vec2(0, 2.5), 2.2, new LJS.Color(1, 0.3, 0.3));
-    LJS.drawText(`Score: ${score}`, LJS.vec2(0, 0.8), 1.1, new LJS.Color(1, 1, 1));
-    LJS.drawText(`Best:  ${highScore}`, LJS.vec2(0, -0.5), 1.0, new LJS.Color(0.5, 0.8, 0.5));
-    LJS.drawText("TAP TO RETRY", LJS.vec2(0, -2.4), 1.1, new LJS.Color(1, 0.9, 0.2));
+  // ── Game Over screen ──
+  if (phase === "gameover") {
+    LJS.drawRect(LJS.vec2(0, 0), LJS.vec2(W + 2, H + 2), new LJS.Color(0.0, 0.0, 0.08, 0.75));
+    LJS.drawText("GAME OVER", LJS.vec2(0, 3.0), 2.2, new LJS.Color(1, 0.3, 0.3));
+    LJS.drawText(`Score: ${score}`, LJS.vec2(0, 0.8), 1.2, new LJS.Color(1, 1, 1));
+    LJS.drawText(`Best:  ${highScore}`, LJS.vec2(0, -0.6), 1.0, new LJS.Color(0.3, 1.0, 0.5));
+    LJS.drawText("TAP / CLICK TO RETRY", LJS.vec2(0, -2.5), 1.0, new LJS.Color(1, 0.9, 0.2));
   }
 
-  if (phase === "won") {
-    LJS.drawRect(LJS.vec2(0, 0), LJS.vec2(WORLD_W * 2, WORLD_H * 2), new LJS.Color(0, 0, 0, 0.5));
-    LJS.drawText("YOU WIN! 🎉", LJS.vec2(0, 2.5), 2.0, new LJS.Color(1, 0.9, 0.2));
-    LJS.drawText(`Score: ${score}`, LJS.vec2(0, 0.8), 1.1, new LJS.Color(1, 1, 1));
-    LJS.drawText(`Best:  ${highScore}`, LJS.vec2(0, -0.5), 1.0, new LJS.Color(0.5, 0.8, 0.5));
-    LJS.drawText("TAP TO PLAY AGAIN", LJS.vec2(0, -2.4), 1.0, new LJS.Color(1, 0.9, 0.2));
-  }
-
-  if (phase === "playing" && ballStuck) {
-    LJS.drawText("SPACE / tap to launch", LJS.vec2(0, -6.5), 0.75, new LJS.Color(0.7, 0.7, 0.9, 0.8));
+  // ── Pre-launch hint ──
+  if (phase === "playing" && !ballLaunched) {
+    LJS.drawText("Click or Space to launch", LJS.vec2(0, PADDLE_Y - 1.4), 0.7, new LJS.Color(1, 1, 0.5, 0.85));
   }
 }
 
 function gameRenderPost() {}
 function gameUpdatePost() {}
 
-// ─── React shell ──────────────────────────────────────────────────────────────
+// ─── React wrapper ────────────────────────────────────────────────────────────
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const startedRef = useRef(false);
+  const startedRef   = useRef(false);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container || startedRef.current) return;
     startedRef.current = true;
-
     void LJS.engineInit(
-      gameInit,
-      gameUpdate,
-      gameUpdatePost,
-      gameRender,
-      gameRenderPost,
-      [],
-      container,
+      gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost,
+      [], container,
     );
   }, []);
 
