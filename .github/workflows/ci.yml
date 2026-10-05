@@ -1,0 +1,17 @@
+name: Game CI / Deploy (via ci-workflows)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci-and-deploy:
+    uses: freegamestore-online/ci-workflows/.github/workflows/game-ci.yml@main
+    with:
+      cf_project: brick-blast
+    permissions:
+      contents: read
+      deployments: write
+    secrets: inherit
