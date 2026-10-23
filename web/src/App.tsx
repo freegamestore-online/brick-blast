@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as LJS from "littlejsengine";
-import { Shell } from "./components/Shell";
+import { GameShell, GameTopbar, useSound } from "@freegamestore/games";
 
 // ─── Procedural ZzFX sounds — zero asset files ───────────────────────────────
 const sndBounce = new LJS.Sound([, , 440, , 0.02, 0.05, , 1.2, , , , , , 0.5]);
@@ -240,9 +240,17 @@ function startGame() {
 }
 
 // ─── Engine callbacks ─────────────────────────────────────────────────────────
+let gameRoot: HTMLElement | null = null;
+
+function fitCamera() {
+  if (gameRoot) LJS.setCameraScale(Math.max(1, Math.min(gameRoot.clientWidth / (W + 2), gameRoot.clientHeight / (H + 2))));
+}
+
 function gameInit() {
   LJS.setCameraPos(LJS.vec2(0, 0));
-  LJS.setCameraScale(32);
+  fitCamera();
+  spawnBricks();
+  spawnPaddleAndBall();
 }
 
 function gameUpdate() {
@@ -355,23 +363,31 @@ function gameRenderPost() {}
 function gameUpdatePost() {}
 
 // ─── React wrapper ────────────────────────────────────────────────────────────
-export default function App() {
+function GameCanvas() {
+  const { muted } = useSound();
+  useEffect(() => { LJS.setSoundVolume(muted ? 0 : 1); }, [muted]);
   const containerRef = useRef<HTMLDivElement>(null);
   const startedRef   = useRef(false);
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || startedRef.current) return;
-    startedRef.current = true;
-    void LJS.engineInit(
-      gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost,
-      [], container,
-    );
+    if (!container) return;
+    gameRoot = container;
+    const observer = new ResizeObserver(fitCamera);
+    observer.observe(container);
+    fitCamera();
+    if (!startedRef.current) {
+      startedRef.current = true;
+      void LJS.engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost, [], container);
+    }
+    return () => observer.disconnect();
   }, []);
 
   return (
-    <Shell>
-      <div ref={containerRef} className="w-full h-full min-h-[400px]" />
-    </Shell>
+    <div ref={containerRef} className="w-full h-full min-h-0" />
   );
+}
+
+export default function App() {
+  return <GameShell topbar={<GameTopbar title="Brick Blast" />}><GameCanvas /></GameShell>;
 }
