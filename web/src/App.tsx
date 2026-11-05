@@ -48,6 +48,7 @@ let bricks: Brick[] = [];
 let ball: Ball | null = null;
 let paddle: LJS.EngineObject | null = null;
 let paddleTargetX   = 0;
+let lastMouseX      = 0;
 let ballLaunched    = false;
 
 // ─── Brick ────────────────────────────────────────────────────────────────────
@@ -255,6 +256,7 @@ function gameInit() {
 
 function gameUpdate() {
   if (phase === "start" || phase === "gameover") {
+    lastMouseX = LJS.mousePos.x; // ignore pointer position until it moves in play
     if (LJS.mouseWasPressed(0) || LJS.keyWasPressed("Space") || LJS.keyWasPressed("Enter")) {
       startGame();
     }
@@ -263,9 +265,13 @@ function gameUpdate() {
 
   // ── Paddle movement ──
   if (paddle) {
-    // Mouse / touch: follow pointer directly
-    paddleTargetX = LJS.clamp(LJS.mousePos.x, -HW + PADDLE_W / 2, HW - PADDLE_W / 2);
-    // Arrow keys add velocity on top
+    // Mouse / touch: follow the pointer only when it moved, so it doesn't
+    // override the arrow keys every frame
+    if (LJS.mousePos.x !== lastMouseX) {
+      lastMouseX = LJS.mousePos.x;
+      paddleTargetX = LJS.clamp(lastMouseX, -HW + PADDLE_W / 2, HW - PADDLE_W / 2);
+    }
+    // Arrow keys move the target
     const kd = Number(LJS.keyIsDown("ArrowRight")) - Number(LJS.keyIsDown("ArrowLeft"));
     paddleTargetX = LJS.clamp(paddleTargetX + kd * 0.35, -HW + PADDLE_W / 2, HW - PADDLE_W / 2);
     paddle.pos.x += (paddleTargetX - paddle.pos.x) * 0.35;

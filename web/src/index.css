@@ -1,4 +1,17 @@
 @import "tailwindcss";
+@import "@freegamestore/games/theme.css";
+@source "../node_modules/@freegamestore/games/dist";
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --font-display: "Fraunces", serif;
+}
 
 :root {
   --bg: #ffffff;
