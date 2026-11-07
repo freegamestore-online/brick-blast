@@ -11,8 +11,8 @@ importers:
   web:
     dependencies:
       '@freegamestore/games':
-        specifier: ^0.19.0
-        version: 0.19.0(react@19.3.1)
+        specifier: ^0.20.2
+        version: 0.20.2(react@19.3.1)
       littlejsengine:
         specifier: ^1.28.0
         version: 1.28.0
@@ -560,8 +560,8 @@ packages:
     resolution: {integrity: sha512-WCsemW40Cpc6gouC1SrY6PBaZ+oLRlEVY9XBvZBI7il/HyUrb2nJ505wE1MHEFyDZNnrWDEuy4jL50WVHfTTSQ==}
     engines: {node: '>=6.9.0'}
 
-  '@freegamestore/games@0.19.0':
-    resolution: {integrity: sha512-Y5DV33TxYsn5YHoOGgyyFRUfN+t+9RXWJPyWo7P1nsTT8NMbR1XfGHhxOk0ERZAMuj1TUbCEDeI+UpYQ8GqcSg==}
+  '@freegamestore/games@0.20.2':
+    resolution: {integrity: sha512-P6VDhSSuesHdF0nZYPQAbgENeRSc67gnGHpSN3b/iU4FHcDbm3c9cSOcLVeFeWz8qBRsKxwSWqqTgqaHxfIsDg==}
     engines: {node: '>=22'}
     peerDependencies:
       react: ^19.0.0
@@ -2927,7 +2927,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.11
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@freegamestore/games@0.19.0(react@19.3.1)':
+  '@freegamestore/games@0.20.2(react@19.3.1)':
     dependencies:
       react: 19.3.1
 
