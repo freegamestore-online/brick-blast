@@ -1,4 +1,10 @@
 @import "tailwindcss";
+
+/* Token utilities the SDK components use: bg-paper, text-ink, border-line, ... */
+@theme inline {
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+}
 @import "@freegamestore/games/theme.css";
 @source "../node_modules/@freegamestore/games/dist";
 
